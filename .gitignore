@@ -4,3 +4,6 @@ out
 .DS_Store
 .eslintcache
 *.log*
+
+# File di lavoro privato — non pubblicare su GitHub
+roadmap.md
