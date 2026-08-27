@@ -100,6 +100,21 @@ const T = (
   outline: buildOutlineFromParams(height, base, rakeFraction, tipTuck)
 })
 
+export interface FinBoxDimension {
+  length: number
+  width: number
+  depth: number
+}
+
+export const FIN_BOX_DIMENSIONS: Record<FinBoxType, FinBoxDimension> = {
+  FCS1: { length: 8.5, width: 1.6, depth: 1.5 },
+  FCS2: { length: 10.4, width: 1.8, depth: 1.6 },
+  Futures: { length: 14.2, width: 1.9, depth: 1.9 },
+  USBox: { length: 26.8, width: 2.4, depth: 2.6 },
+  Lokbox: { length: 9.8, width: 1.9, depth: 1.6 },
+  GlassOn: { length: 0, width: 0, depth: 0 }
+}
+
 /** Templates loosely modeled on common commercial fin families (see roadmap.md §2.4 / fin research). */
 export const FIN_TEMPLATES: FinTemplate[] = [
   T('T1', 'T1 — Thruster Standard', 'thruster', 11.6, 11.3, 0.42, '80/20', 'round'),
@@ -112,7 +127,11 @@ export const FIN_TEMPLATES: FinTemplate[] = [
   T('K1', 'K1 — Keel', 'keel', 13.2, 15.5, 0.5, 'flat', 'round', 0.22),
   T('L1', 'L1 — Longboard Pivot 8"', 'longboard', 20.3, 15.2, 0.28, '50/50', 'round'),
   T('L2', 'L2 — Longboard Flex 8"', 'longboard', 20.3, 14.5, 0.46, '50/50', 'narrow'),
-  T('TW1', 'TW1 — Twin Keel-ish', 'twin', 13.0, 14.0, 0.44, 'flat', 'round')
+  T('TW1', 'TW1 — Twin Keel-ish', 'twin', 13.0, 14.0, 0.44, 'flat', 'round'),
+  T('FCS_CARVER', 'FCS II Carver (Sweep/Rake-heavy)', 'thruster', 11.6, 11.3, 0.45, '80/20', 'round'),
+  T('FCS_PERFORMER', 'FCS II Performer (Balanced)', 'thruster', 11.5, 11.1, 0.35, '80/20', 'round'),
+  T('FUTURES_F6', 'Futures F6 (Medium Template)', 'thruster', 11.4, 11.2, 0.38, 'flat', 'round'),
+  T('USBOX_PIVOT', 'US Box Pivot 9.0 (Longboard)', 'longboard', 22.8, 16.5, 0.18, '50/50', 'round')
 ]
 
 export function findTemplate(id: string): FinTemplate {

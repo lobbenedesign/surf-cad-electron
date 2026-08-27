@@ -5,7 +5,7 @@ import * as THREE from 'three'
 import { STLExporter } from 'three/examples/jsm/exporters/STLExporter.js'
 import { generateBoardGeometry } from './meshGenerator'
 import { generateFinBladeGeometry, generateFinBoxGeometry } from './finGeometry'
-import { evaluateCurve, resampleOnX } from './bezier'
+import { evaluateCurve, evaluatePath, resampleOnX } from './bezier'
 import type { BoardState, CurveCP } from './types'
 
 /** Builds a single mesh (board + fins merged as siblings) scaled from cm to mm for export. */
@@ -17,6 +17,8 @@ function buildExportGroup(board: BoardState): THREE.Group {
   group.add(boardMesh)
 
   const rockerCurve = evaluateCurve(...(board.rocker as CurveCP), 200)
+  const outlineCurveRight = evaluatePath(board.outline, 200)
+  const outlineCurveLeft = board.outlineSymmetric ? outlineCurveRight : evaluatePath(board.outlineOpposite ?? board.outline, 200)
   board.finSetup.slots.forEach((slot) => {
     const finGroup = new THREE.Group()
     finGroup.add(new THREE.Mesh(generateFinBladeGeometry(slot.fin), material))
@@ -28,7 +30,8 @@ function buildExportGroup(board: BoardState): THREE.Group {
     finGroup.rotateZ(THREE.MathUtils.degToRad(slot.fin.toe))
 
     const mountX = board.length - slot.distFromTail
-    const halfWidthAtStation = resampleOnX(evaluateCurve(...(board.outline as CurveCP), 200), [mountX])[0]
+    const outlineCurveForSide = slot.railInset < 0 ? outlineCurveLeft : outlineCurveRight
+    const halfWidthAtStation = resampleOnX(outlineCurveForSide, [mountX])[0]
     const mountY = Math.sign(slot.railInset) * Math.max(halfWidthAtStation - Math.abs(slot.railInset), 0)
     const mountZ = resampleOnX(rockerCurve, [mountX])[0]
     finGroup.position.set(mountX, mountY, mountZ)

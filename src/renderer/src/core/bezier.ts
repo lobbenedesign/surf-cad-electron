@@ -23,6 +23,23 @@ export function evaluateCurve(p0: Point, p1: Point, p2: Point, p3: Point, steps 
   return curve
 }
 
+/**
+ * Evaluates a chained multi-segment path (length 3k+1: anchors at every 3rd
+ * index, the two points between are that segment's handles) into x-ascending
+ * samples. `stepsPerSegment` applies per segment; segment boundaries aren't
+ * duplicated. A plain 4-point curve (k=1) behaves identically to evaluateCurve.
+ */
+export function evaluatePath(path: Point[], stepsPerSegment = 100): Point[] {
+  const segCount = Math.max(1, Math.round((path.length - 1) / 3))
+  const out: Point[] = []
+  for (let s = 0; s < segCount; s++) {
+    const base = s * 3
+    const seg = evaluateCurve(path[base], path[base + 1], path[base + 2], path[base + 3], stepsPerSegment)
+    out.push(...(s === 0 ? seg : seg.slice(1)))
+  }
+  return out
+}
+
 /** Linear interpolation equivalent to numpy.interp: xp must be sorted ascending. */
 export function interp(x: number, xp: number[], fp: number[]): number {
   const n = xp.length

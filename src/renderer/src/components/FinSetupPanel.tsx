@@ -1,5 +1,8 @@
-import { FIN_TEMPLATES, defaultFinSetup, findTemplate, updateFinPosition } from '../core/finTypes'
-import type { FinSetup, FinSetupType, FinSlot } from '../core/finTypes'
+import { FIN_TEMPLATES, defaultFinSetup, findTemplate, updateFinPosition, FIN_BOX_DIMENSIONS } from '../core/finTypes'
+import type { FinSetup, FinSetupType, FinSlot, FinBoxType } from '../core/finTypes'
+import { exportFinToStl } from '../core/exportFinStl'
+import { exportBoxToStl } from '../core/exportBoxStl'
+import { downloadTextFile } from '../core/exportSTL'
 
 interface FinSetupPanelProps {
   setup: FinSetup
@@ -79,12 +82,90 @@ export function FinSetupPanel({ setup, onChange, selectedSlotId, onSelectSlot, o
               </option>
             ))}
           </select>
+
+          <div style={{ marginBottom: 8 }} onClick={(e) => e.stopPropagation()}>
+            <label style={{ fontSize: 10, color: 'var(--text-dim)', display: 'block', marginBottom: 2 }}>Scassa / Box</label>
+            <select
+              value={slot.fin.box}
+              onChange={(e) => {
+                updateSlot(slot.id, {
+                  fin: { ...slot.fin, box: e.target.value as FinBoxType }
+                })
+              }}
+              style={{ width: '100%', fontSize: 11, padding: '2px 4px' }}
+            >
+              <option value="FCS1">FCS I Plugs</option>
+              <option value="FCS2">FCS II Keyless</option>
+              <option value="Futures">Futures Single Tab</option>
+              <option value="USBox">US Box (Longboard)</option>
+              <option value="Lokbox">Lokbox</option>
+              <option value="GlassOn">Glass-On (Fissa)</option>
+            </select>
+          </div>
+
           <PositionFields
             slot={slot}
             onChange={(patch) => onChange(updateFinPosition(setup, slot.id, patch))}
             onDragStart={onDragStart}
             onDragEnd={onDragEnd}
           />
+
+          {slot.fin.box !== 'GlassOn' && (
+            <div style={{ marginTop: 10, fontSize: 9.5, background: 'rgba(255,159,10,0.08)', border: '1px solid rgba(255,159,10,0.25)', padding: '6px 8px', borderRadius: 4, color: '#ff9f0a', lineHeight: '1.3em' }}>
+              🛠️ <strong>Routing Scassa:</strong> L: {FIN_BOX_DIMENSIONS[slot.fin.box].length}cm · W: {FIN_BOX_DIMENSIONS[slot.fin.box].width}cm · D: {FIN_BOX_DIMENSIONS[slot.fin.box].depth}cm
+            </div>
+          )}
+
+          <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }} onClick={(e) => e.stopPropagation()}>
+            <button
+              onClick={() => {
+                const content = exportFinToStl(slot.fin)
+                downloadTextFile(`pinna_${slot.fin.templateId.toLowerCase()}_${slot.fin.box.toLowerCase()}.stl`, content)
+              }}
+              style={{
+                width: '100%',
+                padding: '6px 8px',
+                fontSize: 10.5,
+                fontWeight: 600,
+                cursor: 'pointer',
+                background: 'var(--accent)',
+                color: '#fff',
+                border: 'none',
+                borderRadius: 4,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 4
+              }}
+            >
+              ⬇️ Esporta Pinna (STL 3D)
+            </button>
+            {slot.fin.box !== 'GlassOn' && (
+              <button
+                onClick={() => {
+                  const content = exportBoxToStl(slot.fin.box)
+                  downloadTextFile(`scassa_${slot.fin.box.toLowerCase()}.stl`, content)
+                }}
+                style={{
+                  width: '100%',
+                  padding: '6px 8px',
+                  fontSize: 10.5,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  background: '#2c2c2e',
+                  color: '#fff',
+                  border: '1px solid var(--border)',
+                  borderRadius: 4,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 4
+                }}
+              >
+                ⬇️ Esporta Scassa (STL 3D)
+              </button>
+            )}
+          </div>
         </div>
       ))}
     </div>

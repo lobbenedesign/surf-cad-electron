@@ -7,3 +7,6 @@ out
 
 # File di lavoro privato — non pubblicare su GitHub
 roadmap.md
+
+# Contiene codice sorgente GPL-3.0 di OpenShaper copiato verbatim — non pubblicare (rischio di contaminazione licenza)
+opensurfcad.md

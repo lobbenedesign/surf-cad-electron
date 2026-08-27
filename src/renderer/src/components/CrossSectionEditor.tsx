@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { buildFullRailLoop, type CrossSectionStation } from '../core/crossSection'
 import type { Point } from '../core/bezier'
+import { chamferVertex, extendVertex, filletVertex, trimVertex } from '../core/sketchTools'
 
 interface CrossSectionEditorProps {
   stations: CrossSectionStation[]
@@ -18,6 +19,8 @@ export function CrossSectionEditor({ stations, onChange, onDragStart, onDragEnd 
   const [size, setSize] = useState({ w: 500, h: 400 })
   const [dragging, setDragging] = useState<number | null>(null)
   const draggingRef = useRef<number | null>(null)
+  const [selectedIdx, setSelectedIdx] = useState<number | null>(null)
+  const [toolAmount, setToolAmount] = useState(0.08)
 
   useEffect(() => {
     const el = containerRef.current
@@ -115,11 +118,12 @@ export function CrossSectionEditor({ stations, onChange, onDragStart, onDragEnd 
     ctx.stroke()
 
     // Control points
-    station.points.forEach((p) => {
+    station.points.forEach((p, i) => {
       const [sx, sy] = toScreen(p)
+      const isSelected = i === selectedIdx
       ctx.beginPath()
-      ctx.arc(sx, sy, 6, 0, Math.PI * 2)
-      ctx.fillStyle = '#007aff'
+      ctx.arc(sx, sy, isSelected ? 8 : 6, 0, Math.PI * 2)
+      ctx.fillStyle = isSelected ? '#ff9f0a' : '#007aff'
       ctx.fill()
       ctx.strokeStyle = '#fff'
       ctx.lineWidth = 1.5
@@ -130,7 +134,7 @@ export function CrossSectionEditor({ stations, onChange, onDragStart, onDragEnd 
     ctx.font = '11px sans-serif'
     ctx.fillText('bottom', size.w / 2 - 18, size.h - 8)
     ctx.fillText('deck', size.w / 2 - 12, PADDING + 12)
-  }, [station, stations, stationIdx, size, toScreen])
+  }, [station, stations, stationIdx, size, toScreen, selectedIdx])
 
   const hitTest = (mx: number, my: number): number | null => {
     if (!station) return null
@@ -147,6 +151,7 @@ export function CrossSectionEditor({ stations, onChange, onDragStart, onDragEnd 
     const my = e.clientY - rect.top
     const hit = hitTest(mx, my)
     if (hit !== null) {
+      setSelectedIdx(hit)
       draggingRef.current = hit
       setDragging(hit)
       ;(e.target as HTMLCanvasElement).setPointerCapture(e.pointerId)
@@ -198,6 +203,39 @@ export function CrossSectionEditor({ stations, onChange, onDragStart, onDragEnd 
     })
   }
 
+  const isInteriorSelected = selectedIdx !== null && selectedIdx > 0 && selectedIdx < (station?.points.length ?? 0) - 1
+
+  const applyFillet = (): void => {
+    if (!station || selectedIdx === null) return
+    onDragStart?.()
+    onChange(stationIdx, filletVertex(station.points, selectedIdx, toolAmount))
+    onDragEnd?.()
+    setSelectedIdx(null)
+  }
+
+  const applyChamfer = (): void => {
+    if (!station || selectedIdx === null) return
+    onDragStart?.()
+    onChange(stationIdx, chamferVertex(station.points, selectedIdx, toolAmount))
+    onDragEnd?.()
+    setSelectedIdx(null)
+  }
+
+  const applyTrim = (): void => {
+    if (!station || selectedIdx === null) return
+    onDragStart?.()
+    onChange(stationIdx, trimVertex(station.points, selectedIdx))
+    onDragEnd?.()
+    setSelectedIdx(null)
+  }
+
+  const applyExtend = (): void => {
+    if (!station || selectedIdx === null) return
+    onDragStart?.()
+    onChange(stationIdx, extendVertex(station.points, selectedIdx, toolAmount))
+    onDragEnd?.()
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div
@@ -226,6 +264,38 @@ export function CrossSectionEditor({ stations, onChange, onDragStart, onDragEnd 
           ➕ Punto
         </button>
         <button onClick={removePoint}>➖ Punto</button>
+      </div>
+      <div
+        className="ref-image-bar"
+        style={{ opacity: isInteriorSelected ? 1 : 0.5 }}
+      >
+        <span style={{ color: 'var(--text-dim)' }}>
+          {isInteriorSelected ? `Punto ${selectedIdx} selezionato` : 'Seleziona un punto interno per fillet/chamfer/trim/extend'}
+        </span>
+        <label>
+          Raggio/distanza
+          <input
+            type="number"
+            step={0.01}
+            min={0.01}
+            max={0.5}
+            value={toolAmount}
+            onChange={(e) => setToolAmount(Number(e.target.value))}
+            style={{ width: 60 }}
+          />
+        </label>
+        <button onClick={applyFillet} disabled={!isInteriorSelected}>
+          ⌒ Fillet
+        </button>
+        <button onClick={applyChamfer} disabled={!isInteriorSelected}>
+          ⟋ Chamfer
+        </button>
+        <button onClick={applyTrim} disabled={!isInteriorSelected}>
+          ✂️ Trim
+        </button>
+        <button onClick={applyExtend} disabled={!isInteriorSelected}>
+          ↔️ Extend
+        </button>
       </div>
       <div ref={containerRef} style={{ flex: 1, minHeight: 0 }}>
         <canvas

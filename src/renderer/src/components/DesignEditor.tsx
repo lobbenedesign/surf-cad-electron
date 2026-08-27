@@ -3,22 +3,28 @@
 // (top) and bottom or shared between the two. Exports to PNG, SVG, and PDF.
 import { useCallback, useEffect, useRef, useState } from 'react'
 import jsPDF from 'jspdf'
-import { evaluateCurve, type Point } from '../core/bezier'
+import { evaluatePath, type Point } from '../core/bezier'
 import {
+  alignLayers,
   createLayer,
+  distributeLayers,
   exportDesignSvg,
   layersFor,
+  renderDesignCanvas,
   updateLayers,
+  type AlignMode,
   type BoardDesign,
   type DesignLayer,
   type DesignSurface
 } from '../core/design'
-import type { CurveCP } from '../core/types'
+import { getOrRenderPdfCanvas } from '../core/pdfRender'
 
 interface DesignEditorProps {
   design: BoardDesign
   onChange: (design: BoardDesign) => void
-  outline: CurveCP
+  outline: Point[]
+  /** Independently-shaped left rail, only present when the board's outline is asymmetric. */
+  outlineOpposite?: Point[]
   length: number
   width: number
   onDragStart?: () => void
@@ -28,8 +34,12 @@ interface DesignEditorProps {
 const PADDING = 30
 const HANDLE_SIZE = 8
 const MIN_SIZE = 2
+const ROTATE_HANDLE_OFFSET = 22
 
-type DragMode = { kind: 'move'; id: string; startPointer: Point; startLayer: DesignLayer } | { kind: 'resize'; id: string }
+type DragMode =
+  | { kind: 'move'; id: string; startPointer: Point; startLayers: Map<string, DesignLayer> }
+  | { kind: 'resize'; id: string }
+  | { kind: 'rotate'; id: string }
 
 function toLocal(px: number, py: number, layer: DesignLayer): Point {
   const dx = px - layer.x
@@ -47,18 +57,37 @@ function toWorld(lx: number, ly: number, layer: DesignLayer): Point {
   return { x: layer.x + lx * cos - ly * sin, y: layer.y + lx * sin + ly * cos }
 }
 
-export function DesignEditor({ design, onChange, outline, length, width, onDragStart, onDragEnd }: DesignEditorProps): React.JSX.Element {
+export function DesignEditor({
+  design,
+  onChange,
+  outline,
+  outlineOpposite,
+  length,
+  width,
+  onDragStart,
+  onDragEnd
+}: DesignEditorProps): React.JSX.Element {
   const [surface, setSurface] = useState<DesignSurface>('deck')
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState({ w: 700, h: 320 })
   const dragRef = useRef<DragMode | null>(null)
   const imageCache = useRef<Map<string, HTMLImageElement>>(new Map())
+  const pdfCache = useRef<Map<string, HTMLCanvasElement>>(new Map())
+  const pdfPending = useRef<Set<string>>(new Set())
   const [, bumpRender] = useState(0)
 
   const layers = layersFor(design, surface)
+  const selectedId = selectedIds.length === 1 ? selectedIds[0] : null
   const selected = layers.find((l) => l.id === selectedId) ?? null
+  const isSelected = (id: string): boolean => selectedIds.includes(id)
+  const toggleSelection = (id: string, additive: boolean): void => {
+    setSelectedIds((prev) => {
+      if (!additive) return [id]
+      return prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    })
+  }
 
   useEffect(() => {
     const el = containerRef.current
@@ -104,7 +133,8 @@ export function DesignEditor({ design, onChange, outline, length, width, onDragS
     return img.complete && img.naturalWidth > 0 ? img : null
   }
 
-  const outlineCurve = evaluateCurve(...outline, 150)
+  const outlineCurve = evaluatePath(outline, 150)
+  const outlineCurveOpposite = evaluatePath(outlineOpposite ?? outline, 150)
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -119,8 +149,9 @@ export function DesignEditor({ design, onChange, outline, length, width, onDragS
     ctx.fillRect(PADDING, PADDING, size.w - 2 * PADDING, size.h - 2 * PADDING)
 
     const drawRail = (mirror: boolean): void => {
+      const curve = mirror ? outlineCurveOpposite : outlineCurve
       ctx.beginPath()
-      outlineCurve.forEach((p, i) => {
+      curve.forEach((p, i) => {
         const [sx, sy] = toScreen(mirror ? { x: p.x, y: -p.y } : p)
         if (i === 0) ctx.moveTo(sx, sy)
         else ctx.lineTo(sx, sy)
@@ -164,41 +195,77 @@ export function DesignEditor({ design, onChange, outline, length, width, onDragS
       } else if (layer.type === 'image' && layer.src) {
         const img = getImage(layer.src)
         if (img) ctx.drawImage(img, -w / 2, -h / 2, w, h)
-      } else if (layer.type === 'pdf') {
-        ctx.fillStyle = '#3c3c3c'
-        ctx.fillRect(-w / 2, -h / 2, w, h)
-        ctx.strokeStyle = '#888'
-        ctx.strokeRect(-w / 2, -h / 2, w, h)
-        ctx.fillStyle = '#ccc'
-        ctx.font = '11px sans-serif'
-        ctx.textAlign = 'center'
-        ctx.fillText('📄 PDF', 0, -4)
-        ctx.font = '9px sans-serif'
-        ctx.fillText(layer.name ?? '', 0, 10)
-        ctx.textAlign = 'left'
+      } else if (layer.type === 'pdf' && layer.src) {
+        const pdfCanvas = getOrRenderPdfCanvas(layer.src, pdfCache.current, pdfPending.current, () => bumpRender((n) => n + 1))
+        if (pdfCanvas) {
+          ctx.drawImage(pdfCanvas, -w / 2, -h / 2, w, h)
+        } else {
+          // Still rasterizing (or failed) — a lightweight placeholder, not the final look.
+          ctx.fillStyle = '#3c3c3c'
+          ctx.fillRect(-w / 2, -h / 2, w, h)
+          ctx.strokeStyle = '#888'
+          ctx.strokeRect(-w / 2, -h / 2, w, h)
+          ctx.fillStyle = '#ccc'
+          ctx.font = '11px sans-serif'
+          ctx.textAlign = 'center'
+          ctx.fillText('📄 …', 0, -4)
+          ctx.font = '9px sans-serif'
+          ctx.fillText(layer.name ?? '', 0, 10)
+          ctx.textAlign = 'left'
+        }
       }
       ctx.restore()
 
-      if (layer.id === selectedId) {
+      if (isSelected(layer.id)) {
+        const isPrimary = layer.id === selectedId && selectedIds.length === 1
         ctx.save()
         ctx.translate(sx, sy)
         ctx.rotate((layer.rotation * Math.PI) / 180)
-        ctx.strokeStyle = '#ff9500'
+        ctx.strokeStyle = isPrimary ? '#ff9500' : '#5ac8fa'
         ctx.lineWidth = 1
         ctx.setLineDash([4, 3])
         ctx.strokeRect(-w / 2, -h / 2, w, h)
         ctx.setLineDash([])
-        ctx.fillStyle = '#ff9500'
-        ctx.fillRect(w / 2 - HANDLE_SIZE / 2, h / 2 - HANDLE_SIZE / 2, HANDLE_SIZE, HANDLE_SIZE)
+        if (isPrimary) {
+          ctx.fillStyle = '#ff9500'
+          ctx.fillRect(w / 2 - HANDLE_SIZE / 2, h / 2 - HANDLE_SIZE / 2, HANDLE_SIZE, HANDLE_SIZE)
+          // Rotate handle: a circle above the top edge, connected by a line — both drawn
+          // in the same rotated+translated canvas space as the shape, so it stays
+          // visually attached to the box through any rotation.
+          const handleY = -h / 2 - ROTATE_HANDLE_OFFSET
+          ctx.beginPath()
+          ctx.moveTo(0, -h / 2)
+          ctx.lineTo(0, handleY)
+          ctx.stroke()
+          ctx.beginPath()
+          ctx.arc(0, handleY, HANDLE_SIZE / 2, 0, Math.PI * 2)
+          ctx.fill()
+        }
         ctx.restore()
       }
     })
-  }, [layers, outlineCurve, size, selectedId, toScreen, scale])
+  }, [layers, outlineCurve, outlineCurveOpposite, size, selectedIds, selectedId, toScreen, scale])
 
   const hitTestHandle = (mx: number, my: number): string | null => {
     if (!selected) return null
     const handleWorld = toWorld(selected.width / 2, selected.height / 2, selected)
     const [hx, hy] = toScreen(handleWorld)
+    if (Math.hypot(hx - mx, hy - my) < 9) return selected.id
+    return null
+  }
+
+  /** The rotate handle is drawn in raw screen-pixel space (see the draw effect above), so hit-testing and the drag math below both stay in screen space rather than going through the logical/cm `toWorld` transform. */
+  const rotateHandleScreenPos = (layer: DesignLayer): [number, number] => {
+    const [cx, cy] = toScreen({ x: layer.x, y: layer.y })
+    const halfH = (layer.height * scale) / 2
+    const rad = (layer.rotation * Math.PI) / 180
+    const r = halfH + ROTATE_HANDLE_OFFSET
+    return [cx + r * Math.sin(rad), cy - r * Math.cos(rad)]
+  }
+
+  const hitTestRotateHandle = (mx: number, my: number): string | null => {
+    if (!selected) return null
+    const [hx, hy] = rotateHandleScreenPos(selected)
     if (Math.hypot(hx - mx, hy - my) < 9) return selected.id
     return null
   }
@@ -215,10 +282,28 @@ export function DesignEditor({ design, onChange, outline, length, width, onDragS
 
   const commit = (nextLayers: DesignLayer[]): void => onChange(updateLayers(design, surface, nextLayers))
 
+  const applyAlign = (mode: AlignMode): void => {
+    onDragStart?.()
+    commit(alignLayers(layers, selectedIds, mode))
+    onDragEnd?.()
+  }
+  const applyDistribute = (axis: 'x' | 'y'): void => {
+    onDragStart?.()
+    commit(distributeLayers(layers, selectedIds, axis))
+    onDragEnd?.()
+  }
+
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>): void => {
     const rect = canvasRef.current!.getBoundingClientRect()
     const mx = e.clientX - rect.left
     const my = e.clientY - rect.top
+    const rotateId = hitTestRotateHandle(mx, my)
+    if (rotateId) {
+      dragRef.current = { kind: 'rotate', id: rotateId }
+      ;(e.target as HTMLCanvasElement).setPointerCapture(e.pointerId)
+      onDragStart?.()
+      return
+    }
     const resizeId = hitTestHandle(mx, my)
     if (resizeId) {
       dragRef.current = { kind: 'resize', id: resizeId }
@@ -228,12 +313,14 @@ export function DesignEditor({ design, onChange, outline, length, width, onDragS
     }
     const hit = hitTestLayer(mx, my)
     if (hit) {
-      setSelectedId(hit.id)
-      dragRef.current = { kind: 'move', id: hit.id, startPointer: toLogical(mx, my), startLayer: { ...hit } }
+      const movingIds = e.shiftKey ? (isSelected(hit.id) ? selectedIds : [...selectedIds, hit.id]) : isSelected(hit.id) && selectedIds.length > 1 ? selectedIds : [hit.id]
+      setSelectedIds(movingIds)
+      const startLayers = new Map(movingIds.map((id) => [id, { ...(layers.find((l) => l.id === id) as DesignLayer) }]))
+      dragRef.current = { kind: 'move', id: hit.id, startPointer: toLogical(mx, my), startLayers }
       ;(e.target as HTMLCanvasElement).setPointerCapture(e.pointerId)
       onDragStart?.()
-    } else {
-      setSelectedId(null)
+    } else if (!e.shiftKey) {
+      setSelectedIds([])
     }
   }
 
@@ -241,19 +328,32 @@ export function DesignEditor({ design, onChange, outline, length, width, onDragS
     const drag = dragRef.current
     if (!drag) return
     const rect = canvasRef.current!.getBoundingClientRect()
-    const logical = toLogical(e.clientX - rect.left, e.clientY - rect.top)
+    const mx = e.clientX - rect.left
+    const my = e.clientY - rect.top
+    const logical = toLogical(mx, my)
 
     if (drag.kind === 'move') {
       const dx = logical.x - drag.startPointer.x
       const dy = logical.y - drag.startPointer.y
-      commit(layers.map((l) => (l.id === drag.id ? { ...l, x: drag.startLayer.x + dx, y: drag.startLayer.y + dy } : l)))
-    } else {
+      commit(
+        layers.map((l) => {
+          const start = drag.startLayers.get(l.id)
+          return start ? { ...l, x: start.x + dx, y: start.y + dy } : l
+        })
+      )
+    } else if (drag.kind === 'resize') {
       const layer = layers.find((l) => l.id === drag.id)
       if (!layer) return
       const local = toLocal(logical.x, logical.y, layer)
       const newWidth = Math.max(MIN_SIZE, Math.abs(local.x) * 2)
       const newHeight = Math.max(MIN_SIZE, Math.abs(local.y) * 2)
       commit(layers.map((l) => (l.id === drag.id ? { ...l, width: newWidth, height: newHeight } : l)))
+    } else {
+      const layer = layers.find((l) => l.id === drag.id)
+      if (!layer) return
+      const [cx, cy] = toScreen({ x: layer.x, y: layer.y })
+      const rotation = (Math.atan2(mx - cx, -(my - cy)) * 180) / Math.PI
+      commit(layers.map((l) => (l.id === drag.id ? { ...l, rotation } : l)))
     }
   }
 
@@ -265,7 +365,16 @@ export function DesignEditor({ design, onChange, outline, length, width, onDragS
   const addShape = (type: 'rect' | 'line'): void => {
     const layer = createLayer(type, { x: length / 2, y: 0 })
     commit([...layers, layer])
-    setSelectedId(layer.id)
+    setSelectedIds([layer.id])
+  }
+
+  const moveLayerZOrder = (id: string, direction: 'up' | 'down'): void => {
+    const i = layers.findIndex((l) => l.id === id)
+    const j = direction === 'up' ? i + 1 : i - 1
+    if (i < 0 || j < 0 || j >= layers.length) return
+    const next = [...layers]
+    ;[next[i], next[j]] = [next[j], next[i]]
+    commit(next)
   }
 
   const importFile = (files: FileList | null, kind: 'image' | 'pdf'): void => {
@@ -286,7 +395,7 @@ export function DesignEditor({ design, onChange, outline, length, width, onDragS
           name: file.name
         })
         commit([...layers, layer])
-        setSelectedId(layer.id)
+        setSelectedIds([layer.id])
       }
       if (kind === 'image') {
         const img = new Image()
@@ -301,7 +410,7 @@ export function DesignEditor({ design, onChange, outline, length, width, onDragS
 
   const removeLayer = (id: string): void => {
     commit(layers.filter((l) => l.id !== id))
-    if (selectedId === id) setSelectedId(null)
+    setSelectedIds((prev) => prev.filter((x) => x !== id))
   }
 
   const updateSelected = (patch: Partial<DesignLayer>): void => {
@@ -318,46 +427,17 @@ export function DesignEditor({ design, onChange, outline, length, width, onDragS
     URL.revokeObjectURL(url)
   }
 
-  const renderCleanCanvas = (): HTMLCanvasElement => {
-    const pxPerCm = 8
-    const c = document.createElement('canvas')
-    c.width = length * pxPerCm
-    c.height = width * pxPerCm
-    const ctx = c.getContext('2d')!
-    ctx.fillStyle = '#0b0b0b'
-    ctx.fillRect(0, 0, c.width, c.height)
-    layers.forEach((layer) => {
-      const cx = layer.x * pxPerCm
-      const cy = (layer.y + width / 2) * pxPerCm
-      const w = layer.width * pxPerCm
-      const h = layer.height * pxPerCm
-      ctx.save()
-      ctx.translate(cx, cy)
-      ctx.rotate((layer.rotation * Math.PI) / 180)
-      if (layer.type === 'rect') {
-        if (layer.filled) {
-          ctx.fillStyle = layer.color
-          ctx.fillRect(-w / 2, -h / 2, w, h)
-        } else {
-          ctx.strokeStyle = layer.color
-          ctx.lineWidth = layer.strokeWidth * pxPerCm
-          ctx.strokeRect(-w / 2, -h / 2, w, h)
-        }
-      } else if (layer.type === 'line') {
-        ctx.strokeStyle = layer.color
-        ctx.lineWidth = layer.strokeWidth * pxPerCm
-        ctx.beginPath()
-        ctx.moveTo(-w / 2, -h / 2)
-        ctx.lineTo(w / 2, h / 2)
-        ctx.stroke()
-      } else if (layer.type === 'image' && layer.src) {
-        const img = getImage(layer.src)
-        if (img) ctx.drawImage(img, -w / 2, -h / 2, w, h)
-      }
-      ctx.restore()
-    })
-    return c
-  }
+  const renderCleanCanvas = (): HTMLCanvasElement =>
+    renderDesignCanvas(
+      layers,
+      length,
+      width,
+      imageCache.current,
+      () => bumpRender((n) => n + 1),
+      undefined,
+      pdfCache.current,
+      pdfPending.current
+    )
 
   const exportPng = (): void => {
     renderCleanCanvas().toBlob((blob) => {
@@ -366,7 +446,7 @@ export function DesignEditor({ design, onChange, outline, length, width, onDragS
   }
 
   const exportSvg = (): void => {
-    const svg = exportDesignSvg(layers, length, width)
+    const svg = exportDesignSvg(layers, length, width, pdfCache.current)
     download(new Blob([svg], { type: 'image/svg+xml' }), `design-${surface}.svg`)
   }
 
@@ -420,16 +500,49 @@ export function DesignEditor({ design, onChange, outline, length, width, onDragS
           <input type="file" accept="image/*,.svg" onChange={(e) => importFile(e.target.files, 'image')} style={{ fontSize: 11, width: '100%' }} />
         </label>
         <label style={{ display: 'block', fontSize: 12, marginBottom: 14 }}>
-          <span style={{ display: 'block', color: 'var(--text-dim)', marginBottom: 2 }}>Importa PDF (anteprima segnaposto)</span>
+          <span style={{ display: 'block', color: 'var(--text-dim)', marginBottom: 2 }}>Importa PDF (prima pagina renderizzata)</span>
           <input type="file" accept=".pdf" onChange={(e) => importFile(e.target.files, 'pdf')} style={{ fontSize: 11, width: '100%' }} />
         </label>
 
         <h3>Livelli</h3>
+        <p style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: -8 }}>Shift+click per selezione multipla. ▲▼ cambiano l'ordine (z-order).</p>
+        {selectedIds.length >= 2 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 10 }}>
+            <button title="Allinea a sinistra" style={{ fontSize: 11, padding: '3px 6px' }} onClick={() => applyAlign('left')}>
+              ⇤ Sx
+            </button>
+            <button title="Centra orizzontalmente" style={{ fontSize: 11, padding: '3px 6px' }} onClick={() => applyAlign('hcenter')}>
+              ↔ Centro
+            </button>
+            <button title="Allinea a destra" style={{ fontSize: 11, padding: '3px 6px' }} onClick={() => applyAlign('right')}>
+              ⇥ Dx
+            </button>
+            <button title="Allinea in alto" style={{ fontSize: 11, padding: '3px 6px' }} onClick={() => applyAlign('top')}>
+              ⇞ Alto
+            </button>
+            <button title="Centra verticalmente" style={{ fontSize: 11, padding: '3px 6px' }} onClick={() => applyAlign('vcenter')}>
+              ↕ Centro
+            </button>
+            <button title="Allinea in basso" style={{ fontSize: 11, padding: '3px 6px' }} onClick={() => applyAlign('bottom')}>
+              ⇟ Basso
+            </button>
+            {selectedIds.length >= 3 && (
+              <>
+                <button title="Distribuisci orizzontalmente" style={{ fontSize: 11, padding: '3px 6px' }} onClick={() => applyDistribute('x')}>
+                  ⇹ Distrib. X
+                </button>
+                <button title="Distribuisci verticalmente" style={{ fontSize: 11, padding: '3px 6px' }} onClick={() => applyDistribute('y')}>
+                  ⇳ Distrib. Y
+                </button>
+              </>
+            )}
+          </div>
+        )}
         {layers.length === 0 && <p style={{ fontSize: 12, color: 'var(--text-dim)' }}>Nessun elemento. Aggiungine uno sopra.</p>}
-        {layers.map((l) => (
+        {layers.map((l, i) => (
           <div
             key={l.id}
-            onClick={() => setSelectedId(l.id)}
+            onClick={(e) => toggleSelection(l.id, e.shiftKey)}
             style={{
               display: 'flex',
               justifyContent: 'space-between',
@@ -439,21 +552,45 @@ export function DesignEditor({ design, onChange, outline, length, width, onDragS
               borderRadius: 4,
               fontSize: 12,
               cursor: 'pointer',
-              border: '1px solid ' + (selectedId === l.id ? 'var(--accent)' : 'var(--border)')
+              border: '1px solid ' + (isSelected(l.id) ? 'var(--accent)' : 'var(--border)')
             }}
           >
             <span>
               {l.type === 'rect' ? '▭' : l.type === 'line' ? '／' : l.type === 'image' ? '🖼' : '📄'} {l.name ?? l.type}
             </span>
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                removeLayer(l.id)
-              }}
-              style={{ fontSize: 11, padding: '2px 6px' }}
-            >
-              ✕
-            </button>
+            <span style={{ display: 'flex', gap: 2 }}>
+              <button
+                disabled={i === layers.length - 1}
+                title="Porta avanti"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  moveLayerZOrder(l.id, 'up')
+                }}
+                style={{ fontSize: 11, padding: '2px 5px' }}
+              >
+                ▲
+              </button>
+              <button
+                disabled={i === 0}
+                title="Manda indietro"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  moveLayerZOrder(l.id, 'down')
+                }}
+                style={{ fontSize: 11, padding: '2px 5px' }}
+              >
+                ▼
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  removeLayer(l.id)
+                }}
+                style={{ fontSize: 11, padding: '2px 6px' }}
+              >
+                ✕
+              </button>
+            </span>
           </div>
         ))}
 

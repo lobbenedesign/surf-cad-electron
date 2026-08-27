@@ -1,5 +1,6 @@
-import { evaluateCurve, resampleOnX } from './bezier'
+import { evaluateCurve, evaluatePath, resampleOnX } from './bezier'
 import type { Point } from './bezier'
+import { deckStepOffsetAt } from './deckStep'
 import type { BoardState, CurveCP } from './types'
 
 export interface StationMeasurement {
@@ -46,8 +47,9 @@ function stationXAlongStringer(rockerCurve: Point[], length: number, distanceFro
 
 /** Samples width/thickness/rocker at Nose, Nose(30cm), Center, Tail(30cm) and Tail. */
 export function computeStationMeasurements(board: BoardState, mode: MeasureMode = 'straight'): StationMeasurement[] {
-  const { outline, rocker, deck, length } = board
-  const outlineCurve = evaluateCurve(...(outline as CurveCP), 200)
+  const { outline, outlineOpposite, outlineSymmetric, rocker, deck, length } = board
+  const outlineCurve = evaluatePath(outline, 200)
+  const outlineCurveLeft = outlineSymmetric ? outlineCurve : evaluatePath(outlineOpposite ?? outline, 200)
   const rockerCurve = evaluateCurve(...(rocker as CurveCP), 200)
   const deckCurve = evaluateCurve(...(deck as CurveCP), 200)
 
@@ -68,10 +70,11 @@ export function computeStationMeasurements(board: BoardState, mode: MeasureMode 
   ]
 
   return stations.map((s) => {
-    const w = resampleOnX(outlineCurve, [s.x])[0]
+    const wRight = resampleOnX(outlineCurve, [s.x])[0]
+    const wLeft = resampleOnX(outlineCurveLeft, [s.x])[0]
     const rz = resampleOnX(rockerCurve, [s.x])[0]
-    const dz = resampleOnX(deckCurve, [s.x])[0]
-    return { label: s.label, x: s.x, width: w * 2, thickness: Math.max(dz - rz, 0), rocker: rz }
+    const dz = resampleOnX(deckCurve, [s.x])[0] + deckStepOffsetAt(board.deckStep, s.x, length)
+    return { label: s.label, x: s.x, width: wRight + wLeft, thickness: Math.max(dz - rz, 0), rocker: rz }
   })
 }
 
@@ -110,13 +113,17 @@ export function estimateVolumeLiters(board: BoardState): number {
 
 /** Plan-view (outline) surface area, one side, in square meters — used for glass/weight estimates. */
 export function estimatePlanAreaM2(board: BoardState): number {
-  const outlineCurve = evaluateCurve(...(board.outline as CurveCP), 200)
+  const outlineCurve = evaluatePath(board.outline, 200)
+  const outlineCurveLeft = board.outlineSymmetric ? outlineCurve : evaluatePath(board.outlineOpposite ?? board.outline, 200)
   const commonX = Array.from({ length: 100 }, (_, i) => (i / 99) * board.length)
-  const widths = resampleOnX(outlineCurve, commonX) // half-width
+  const widthsRight = resampleOnX(outlineCurve, commonX)
+  const widthsLeft = resampleOnX(outlineCurveLeft, commonX)
   let areaCm2 = 0
   const step = board.length / 99
   for (let i = 0; i < commonX.length - 1; i++) {
-    areaCm2 += (widths[i] + widths[i + 1]) * step // trapezoid of full width (2x half), already *1 since (w0+w1)/2*2 = w0+w1
+    const full0 = widthsRight[i] + widthsLeft[i]
+    const full1 = widthsRight[i + 1] + widthsLeft[i + 1]
+    areaCm2 += ((full0 + full1) / 2) * step
   }
   return areaCm2 / 10000
 }

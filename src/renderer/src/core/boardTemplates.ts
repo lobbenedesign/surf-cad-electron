@@ -182,11 +182,13 @@ export function buildBoardFromTemplate(template: BoardTemplate): BoardState {
     width: maxWidth,
     thickness,
     outline,
+    outlineSymmetric: true,
     rocker,
     deck,
     crossSections: defaultCrossSections(),
     tailShape: { type: template.tailType, swallowDepth: 5, tipToTipWidth: 10 },
     finSetup: defaultFinSetup(template.finSetup),
-    design: defaultBoardDesign()
+    design: defaultBoardDesign(),
+    referenceImages: {}
   }
 }

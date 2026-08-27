@@ -14,9 +14,16 @@ SURF-CAD ELECTRON è un'applicazione desktop per il design e la modellazione 3D 
 - **Modulo Pinne Completo:** 11 template (thruster, quad, keel, ecc.), 4 famiglie di foil, 6 sistemi di attacco (FCS I/II, Futures, US Box, ecc.), setup multi-pinna e posizionamento 3D estremamente realistico e coerente con la larghezza della tavola.
 - **Board Specification Panel:** Controllo analitico delle misure per ogni stazione (Nose, Center, Tail) e calcolo del volume stimato.
 - **Template Tavola Integrati:** Preset pronti all'uso per Shortboard, Fish, Longboard, Gun e Hybrid.
-- **Esportazione per la Produzione:** Export funzionante in formato **STL** (3D per stampe), **DXF** (per CAD/CNC) e **G-code** (per fresatura outline).
-- **Undo/Redo:** Cronologia completa degli stati della tavola per modifiche sicure.
-- **Design Grafico:** Inserimento e posizionamento di decalcomanie e design su deck e bottom (forme primitive, immagini, import SVG).
+- **Esportazione per la Produzione:** Export funzionante in formato **STL** (mesh watertight con naso/coda chiusi, 3D per stampe), **DXF** (per CAD/CNC) e **G-code** (per fresatura outline).
+- **Undo/Redo:** Cronologia completa degli stati della tavola per modifiche sicure, con coalescenza dei gesti di drag in un solo step.
+- **Design Grafico:** Inserimento e posizionamento di decalcomanie e design su deck e bottom (forme primitive, immagini, import SVG, export PNG/SVG/PDF).
+- **Weight Calculator:** Stima peso (foam PU/EPS + glass oz/yd² + hardware) a scopo di preventivo.
+- **Volume Wizard:** Risolve automaticamente lunghezza, larghezza o spessore per colpire un volume target in litri.
+- **Ghost Board:** Sovrapposizione tratteggiata di una seconda tavola (template o snapshot) nelle viste Outline/Rocker, con delta di volume e larghezza per stazione.
+- **Scheda Spec/Ordine PDF:** Foglio riassuntivo A4 non in scala con diagrammi outline/profilo, tabella stazioni, volume e area.
+- **Trace-image:** Immagine di riferimento caricabile dietro gli editor Outline e Rocker, con opacità, posizione, dimensione e specchiatura regolabili, per ricalcare tavole esistenti da foto.
+- **Tabella Stazioni Avanzata:** Toggle tra misurazione "a linea retta" e "lungo lo stringer" (arc-length reale sul rocker), più area piano in m².
+- **Continuità dei Punti di Controllo (v1):** i punti interni delle curve outline/rocker/deck non possono superare i vicini in x — la curva non si "ripiega" mai su se stessa.
 
 ## 📸 Anteprima (Screenshots)
 
@@ -30,13 +37,8 @@ SURF-CAD ELECTRON è un'applicazione desktop per il design e la modellazione 3D 
 Stiamo lavorando per rendere SURF-CAD ELECTRON lo strumento definitivo per qualsiasi tipo di imbarcazione o tavola. Di seguito le implementazioni previste per il futuro:
 
 ### Ottimizzazioni e Strumenti CAD Base
-- **Sistema avanzato di continuità dei punti di controllo:** Maschere per asse, blocco delle tangenti e vincoli tra punti (slave/fix) per curve sempre fluide (es. C2).
-- **Trace-image (Digitalizzazione da Foto):** Inserimento di immagini di riferimento in background con opacità regolabile e calibrazione per ricalcare fedelmente tavole esistenti.
-- **Ghost Board e Confronto Quantitativo:** Possibilità di sovrapporre una seconda tavola nelle viste 2D per valutare visivamente e numericamente i delta di volume e forma.
-- **Weight Calculator:** Calcolatore del peso finale della tavola in base a densità della schiuma (PU/EPS), hardware, tessuto di vetro e resina.
-- **Volume Wizard:** Strumento per generare e scalare automaticamente le dimensioni della tavola al fine di raggiungere un volume target.
-- **Scheda di Produzione PDF:** Generazione di fogli in scala 1:1 (multi-pagina per ricalco su schiuma) e scheda specifiche per l'ordine.
-- **Tabella Numerica Stazioni:** Alternativa avanzata per l'editing delle specifiche tramite griglia numerica.
+- **Sistema di continuità dei punti di controllo (v2 completo):** oggi solo la monotonicità in x è garantita (v1); mancano ancora maschere per asse, blocco delle tangenti a 4-bit e vincoli slave/fix tra punti (es. deck↔bottom condividono il tip), che richiedono un modello anchor+handle.
+- **Scheda di Produzione PDF in scala 1:1:** oggi la scheda PDF è un riassunto non in scala; manca ancora la stampa multi-pagina in scala reale per ricalco su schiuma.
 - **Strumenti CAD Aggiuntivi:** Raccordi (Fillet/Chamfer), trim/extend di segmenti, manipolatore 3D (gizmo) e quotature persistenti sul disegno.
 - **Operazioni Booleane Solide:** Operazioni 3D (estrusione, pocket, unione/sottrazione) necessarie per una corretta realizzazione dei box per pinne, mast track e altri inserti.
 
@@ -83,6 +85,25 @@ Il progetto utilizza [Electron Vite](https://electron-vite.org/) per un setup ra
    # Per Linux
    npm run build:linux
    ```
+
+## ✅ Test automatizzati
+
+Il progetto ha una suite di **31 test automatizzati** ([Vitest](https://vitest.dev/)) sulla logica geometrica/matematica pura del CAD (nessun test su rendering React/Three.js, non significativamente unit-testabile):
+
+- `src/renderer/src/core/bezier.test.ts` — valutazione curve di Bezier cubiche (valori noti a t=0/0.5/1, riduzione a interpolazione lineare per punti equispaziati collineari), concatenazione di path multi-segmento (`evaluatePath`), interpolazione lineare stile `numpy.interp` con clamping, resampling di una curva su una griglia X comune.
+- `src/renderer/src/core/spline.test.ts` — spline Catmull-Rom: passaggio esatto per ogni punto di controllo, riduzione a retta per punti collineari equispaziati, caso degenere a 2 punti.
+- `src/renderer/src/core/curveFit.test.ts` — fit least-squares di una bezier cubica su punti campionati da una curva nota, con recupero dei control point entro tolleranza e round-trip (ri-valutando la curva fittata si riproducono i punti di partenza).
+- `src/renderer/src/core/units.test.ts` — conversione cm → formato imperiale (piedi/pollici/frazioni in 16-esimi) usata per le misure tavola.
+- `src/renderer/src/core/weightCalculator.test.ts` — stima peso tavola (schiuma PU/EPS, vetro oz/yd², hardware): linearità rispetto a volume/layer di vetro, valori attesi calcolati a mano sui coefficienti (densità schiuma, fattore rail-wrap, rapporto resina/vetro).
+
+Un bug reale è stato trovato e corretto durante la scrittura dei test: `cmToImperialStr` (in `units.ts`) produceva una stringa malformata (`6'"` invece di `6' 0"`) per lunghezze esattamente su un confine di piede intero, perché la cifra dei pollici veniva omessa quando risultava zero. Vedi il test di regressione in `units.test.ts`.
+
+Esecuzione:
+```bash
+npm test
+```
+
+La CI su GitHub Actions (`.github/workflows/ci.yml`) esegue `npm run typecheck` + `npm test` su `ubuntu-latest` a ogni push/PR verso `main`. Il packaging Electron (`build:win`/`build:mac`/`build:linux`) non è incluso in CI: richiede toolchain nativi per piattaforma ed è fuori scope per un gate rapido.
 
 ## 📄 Licenza
 
