@@ -77,6 +77,10 @@ export function FinPlacementMap({
   const containerRef = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState({ w: 500, h: 260 })
   const draggingRef = useRef<string | null>(null)
+  // Stesso motivo di DesignEditor.tsx: draggingRef resta un ref (aggiornato ad
+  // ogni pointermove), ma leggerlo durante il render per lo stile del cursore
+  // non aggiorna in modo affidabile — stato dedicato per quello.
+  const [isDragging, setIsDragging] = useState(false)
 
   useEffect(() => {
     const el = containerRef.current
@@ -227,6 +231,7 @@ export function FinPlacementMap({
     const hit = hitTest(e.clientX - rect.left, e.clientY - rect.top)
     if (hit) {
       draggingRef.current = hit
+      setIsDragging(true)
       onSelectSlot(hit)
       ;(e.target as HTMLCanvasElement).setPointerCapture(e.pointerId)
       onDragStart?.()
@@ -257,6 +262,7 @@ export function FinPlacementMap({
   const handlePointerUp = (): void => {
     if (draggingRef.current) onDragEnd?.()
     draggingRef.current = null
+    setIsDragging(false)
   }
 
   return (
@@ -267,7 +273,7 @@ export function FinPlacementMap({
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerLeave={handlePointerUp}
-        style={{ cursor: draggingRef.current ? 'grabbing' : 'crosshair', display: 'block' }}
+        style={{ cursor: isDragging ? 'grabbing' : 'crosshair', display: 'block' }}
       />
     </div>
   )

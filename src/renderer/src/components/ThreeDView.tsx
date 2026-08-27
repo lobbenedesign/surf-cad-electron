@@ -47,17 +47,24 @@ export function ThreeDView({
     raycaster: THREE.Raycaster
   } | null>(null)
   const boardRef = useRef(board)
-  boardRef.current = board
   const selectedFinIdRef = useRef(selectedFinId)
-  selectedFinIdRef.current = selectedFinId
   const onSelectFinRef = useRef(onSelectFin)
-  onSelectFinRef.current = onSelectFin
   const onFinSetupChangeRef = useRef(onFinSetupChange)
-  onFinSetupChangeRef.current = onFinSetupChange
   const onDragStartRef = useRef(onDragStart)
-  onDragStartRef.current = onDragStart
   const onDragEndRef = useRef(onDragEnd)
-  onDragEndRef.current = onDragEnd
+  // Assegnati in un effect, non nel corpo del render: mutare un ref durante il
+  // render è disallowato sotto React concurrent/Strict Mode. Un effect senza
+  // dipendenze gira dopo ogni commit, stesso risultato pratico (i callback
+  // Three.js registrati una volta in altri effect leggono sempre l'ultimo
+  // valore) senza il rischio.
+  useEffect(() => {
+    boardRef.current = board
+    selectedFinIdRef.current = selectedFinId
+    onSelectFinRef.current = onSelectFin
+    onFinSetupChangeRef.current = onFinSetupChange
+    onDragStartRef.current = onDragStart
+    onDragEndRef.current = onDragEnd
+  })
 
   // Renders each surface's design layers (§6) onto a canvas and applies it as that
   // material's texture. `renderDesignCanvas` may not have every image ready yet

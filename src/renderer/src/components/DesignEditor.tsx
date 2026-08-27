@@ -73,6 +73,14 @@ export function DesignEditor({
   const containerRef = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState({ w: 700, h: 320 })
   const dragRef = useRef<DragMode | null>(null)
+  // dragRef stessa resta un ref di proposito (aggiornato ad ogni pointermove,
+  // farlo con setState causerebbe un re-render per ogni micro-movimento). Ma
+  // leggere dragRef.current durante il render per lo stile del cursore (sotto)
+  // è un vero bug di reattività, non solo un tecnicismo del linter: una
+  // mutazione di ref non pianifica un re-render, quindi il cursore "grabbing"
+  // si aggiornerebbe solo per un re-render innescato da qualcos'altro, non
+  // immediatamente quando il drag inizia/finisce. Stato dedicato, minimo.
+  const [isDragging, setIsDragging] = useState(false)
   const imageCache = useRef<Map<string, HTMLImageElement>>(new Map())
   const pdfCache = useRef<Map<string, HTMLCanvasElement>>(new Map())
   const pdfPending = useRef<Set<string>>(new Set())
@@ -300,6 +308,7 @@ export function DesignEditor({
     const rotateId = hitTestRotateHandle(mx, my)
     if (rotateId) {
       dragRef.current = { kind: 'rotate', id: rotateId }
+      setIsDragging(true)
       ;(e.target as HTMLCanvasElement).setPointerCapture(e.pointerId)
       onDragStart?.()
       return
@@ -307,6 +316,7 @@ export function DesignEditor({
     const resizeId = hitTestHandle(mx, my)
     if (resizeId) {
       dragRef.current = { kind: 'resize', id: resizeId }
+      setIsDragging(true)
       ;(e.target as HTMLCanvasElement).setPointerCapture(e.pointerId)
       onDragStart?.()
       return
@@ -317,6 +327,7 @@ export function DesignEditor({
       setSelectedIds(movingIds)
       const startLayers = new Map(movingIds.map((id) => [id, { ...(layers.find((l) => l.id === id) as DesignLayer) }]))
       dragRef.current = { kind: 'move', id: hit.id, startPointer: toLogical(mx, my), startLayers }
+      setIsDragging(true)
       ;(e.target as HTMLCanvasElement).setPointerCapture(e.pointerId)
       onDragStart?.()
     } else if (!e.shiftKey) {
@@ -360,6 +371,7 @@ export function DesignEditor({
   const handlePointerUp = (): void => {
     if (dragRef.current) onDragEnd?.()
     dragRef.current = null
+    setIsDragging(false)
   }
 
   const addShape = (type: 'rect' | 'line'): void => {
@@ -505,7 +517,7 @@ export function DesignEditor({
         </label>
 
         <h3>Livelli</h3>
-        <p style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: -8 }}>Shift+click per selezione multipla. ▲▼ cambiano l'ordine (z-order).</p>
+        <p style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: -8 }}>Shift+click per selezione multipla. ▲▼ cambiano l&apos;ordine (z-order).</p>
         {selectedIds.length >= 2 && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 10 }}>
             <button title="Allinea a sinistra" style={{ fontSize: 11, padding: '3px 6px' }} onClick={() => applyAlign('left')}>
@@ -641,7 +653,7 @@ export function DesignEditor({
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
             onPointerLeave={handlePointerUp}
-            style={{ cursor: dragRef.current ? 'grabbing' : 'default', display: 'block' }}
+            style={{ cursor: isDragging ? 'grabbing' : 'default', display: 'block' }}
           />
         </div>
       </div>

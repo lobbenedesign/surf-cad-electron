@@ -19,8 +19,8 @@ export function BoardSpecPanel({ board, ghostBoard = null }: BoardSpecPanelProps
   const ghostHydro = useMemo(() => (ghostBoard ? computeHydrodynamics(ghostBoard) : null), [ghostBoard])
 
   // Conversion helpers: cm^2 to dm^2 and sq ft
-  const toDm2 = (cm2: number) => cm2 / 100
-  const toSqFt = (cm2: number) => cm2 / 929.03
+  const toDm2 = (cm2: number): number => cm2 / 100
+  const toSqFt = (cm2: number): number => cm2 / 929.03
 
   // SVG Chart path calculation
   const svgPath = useMemo(() => {

@@ -17,7 +17,7 @@ export function cmToImperialStr(cm: number, useFeet: boolean = true): string {
   }
 
   let wholeInches = Math.floor(inches)
-  let fractionFloat = inches - wholeInches
+  const fractionFloat = inches - wholeInches
 
   // Round to nearest 1/16th
   let sixteenths = Math.round(fractionFloat * 16)

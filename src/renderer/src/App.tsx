@@ -310,7 +310,13 @@ function App(): React.JSX.Element {
   }
   const saveBoard = (): void =>
     downloadTextFile(`${safeName()}.surfcad.json`, serializeBoard(board), 'application/json')
-  saveShortcutRef.current = saveBoard
+  // Assegnato in un effect, non nel corpo del render: mutare un ref durante il
+  // render è disallowato sotto React concurrent/Strict Mode (può girare più o
+  // meno volte del previsto). Un effect senza dipendenze gira dopo ogni commit,
+  // stesso risultato pratico (sempre l'ultima saveBoard) senza il rischio.
+  useEffect(() => {
+    saveShortcutRef.current = saveBoard
+  })
   const openBoard = (): void => fileInputRef.current?.click()
   const handleOpenFile = (files: FileList | null): void => {
     const file = files?.[0]
