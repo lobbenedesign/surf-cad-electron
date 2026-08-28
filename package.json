@@ -1,10 +1,11 @@
 {
   "name": "surf-cad-electron",
   "version": "1.0.0",
-  "description": "An Electron application with React and TypeScript",
+  "description": "An advanced 3D CAD desktop application for designing and modeling surfboards and watercrafts, built with React, TypeScript, and Electron",
   "main": "./out/main/index.js",
-  "author": "example.com",
-  "homepage": "https://electron-vite.org",
+  "author": "Giuseppe Lobbene",
+  "license": "MIT",
+  "homepage": "https://github.com/lobbenedesign/surf-cad-electron",
   "scripts": {
     "test": "vitest run",
     "format": "prettier --write .",
